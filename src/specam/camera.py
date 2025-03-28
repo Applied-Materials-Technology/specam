@@ -2,6 +2,8 @@ import numpy as np
 
 from specam.constants import c1, c2, abs0
 from specam.data import SpectralDataGenerated
+from specam.models import fit_data
+from specam.plotting import SpectrumPlot
 
 
 def planck_eqn(lam, T):
@@ -86,3 +88,31 @@ class Camera(object):
             noise_sigma=noise_sigma,
             signal_noise_ratio=signal_noise_ratio,
         )
+
+    def fit_data(self, model_name, spectral_data, **kwargs):
+        return fit_data(
+            model_name,
+            spectral_data,
+            lam_0=self.props["lam_0"],
+            lam_inf=self.props["lam_inf"],
+            **kwargs,
+        )
+
+    def fit_test_data(self, model_name, save_name=None, **kwargs):
+        self.results[save_name or model_name] = self.fit_data(
+            model_name, self.test_data, **kwargs
+        )
+
+    def plot_spectrum(self, result_names=None, **kwargs):
+        if isinstance(result_names, str):
+            result_names = [result_names]
+        result_names = result_names or []
+
+        plot = SpectrumPlot(**kwargs)
+        plot.add_data(kind='true', plot_data=self.test_data, label='measured')
+        for result_name in result_names:
+            plot.add_data(
+                plot_data=self.results[result_name], label=result_name
+            )
+
+        return plot

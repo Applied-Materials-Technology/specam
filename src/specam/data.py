@@ -117,23 +117,19 @@ class SpectralDataGenerated(SpectralData, ScalarData):
         signal_noise_ratio: Optional[float],
     ):
         grid = np.meshgrid(T, lam, indexing="ij")
-        I = intensity_func(
-            grid[1],
-            grid[0],
-            **intensity_params,
-        )
+        I = intensity_func(grid[1], grid[0], **intensity_params)
 
         if signal_noise_ratio is None and noise_sigma is None:
             raise ValueError(
                 '`signal_noise_ratio` or `noise_sigma` must be specified.'
             )
         if noise_sigma is None:
-            noise_sigma = I.max(axis=0) / 0.9 / signal_noise_ratio
+            noise_sigma = I.max(axis=1) / 0.9 / signal_noise_ratio
         else:
             noise_sigma = np.full(len(T), noise_sigma)
 
-        for i, col in enumerate(I.T):
-            col += np.random.normal(0, noise_sigma[i], len(lam))
+        for i, spectrum in enumerate(I):
+            spectrum += np.random.normal(0, noise_sigma[i], len(lam))
         I[I <= 0.] = 1e-8
 
         # epsilon = I[:, 0] / planck_eqn(lam_test, T_0)
@@ -161,7 +157,6 @@ class SpectralDataGenerated(SpectralData, ScalarData):
 class SpectralDataMeasured(SpectralData, ScalarData):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
 
     @classmethod
     def load_far_data(
