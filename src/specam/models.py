@@ -12,59 +12,73 @@ from lmfit.models import Model
 from scipy.optimize import curve_fit, leastsq, minimize
 from scipy.signal import savgol_filter
 
-from numba import njit
+# from numba import njit
 
 from specam.constants import c1, c2, abs0
 from specam.data import SpectralData, SpectralDataFitted
 
 
-@njit
+__all__ = [
+    'fit_data',
+    'fit_data_lmfit', 
+    'fit_data_scipy', 
+    'fit_data_ratio', 
+    'fit_data_pymc',
+]
+
+# @njit
 def planck_eqn(lam, T):
     return c1 / (lam**5 * (np.exp(c2 / (lam * T)) - 1))
 
 
-@njit
+# @njit
 def planck_eqn_log(lam, T):
     return np.log(c1) - 5 * np.log(lam) - np.log(np.exp(c2 / (lam * T)) - 1)
 
 
-@njit
+# @njit
 def planck_wein_eqn(lam, T):
     return c1 / (lam**5 * np.exp(c2 / (lam * T)))
 
 
-@njit
+# @njit
 def planck_wein_eqn_log(lam, T):
     return np.log(c1) - 5 * np.log(lam) - c2 / (lam * T)
 
 
-@njit
+# @njit
 def linear_emissivity(lam, C, D, lam_0, lam_inf):
     return D - C * (lam - lam_0) / (lam_inf - lam_0)
 
 
-@njit
+# @njit
 def intensity_func(lam, T, C, D, lam_0, lam_inf):
     return linear_emissivity(lam, C, D, lam_0, lam_inf) * planck_eqn(lam, T)
 
 
-@njit
+# @njit
 def intensity_func_log(lam, T, C, D, lam_0, lam_inf):
     return np.log(linear_emissivity(lam, C, D, lam_0, lam_inf)) + planck_eqn_log(lam, T)
-
 
 def truncate_data(lam, I, I_ratio):
     """Truncate data below ratio of max intensity from left and right sides
 
-    Args:
-        lam (np.ndarray): Wavelength
-        I (np.ndarray): Intensity
-        I_ratio (float): Ratio of maximum intensity to filter below. Set to 0
-        to remove vales < 0
+    Parameters
+    ----------
+    lam : np.ndarray
+        Wavelength
+    I : np.ndarray
+        Intensity
+    I_ratio : float
+        Ratio of maximum intensity to filter below. Set to 0 to remove vales < 0
 
-    Returns:
-        lam (np.ndarray): Truncated wavelength
-        I (np.ndarray): Truncated intensity
+    Returns
+    -------
+    lam : np.ndarray
+        Truncated wavelength
+    I : np.ndarray
+        Truncated intensity
+
     """
     i_max = I.argmax()
 
@@ -84,20 +98,39 @@ def truncate_data(lam, I, I_ratio):
     #     print(f'lam range: {lt} - {rt}') 
     return lam[cutoff_left:cutoff_right], I[cutoff_left:cutoff_right]
 
+def fit_data(model_name, spectral_data, **kwargs):
+    models = {
+        "lmfit": fit_data_lmfit,
+        "scipy": fit_data_scipy,
+        "pymc": fit_data_pymc,
+        "ratio": fit_data_ratio,
+    }
+    model = models.get(model_name)
+    if model is None:
+        raise ValueError(f"Unknown model_name `{model_name}`")
+    return model(spectral_data, **kwargs)
 
 def fit_data_lmfit(
-    spectral_data : type[SpectralData], 
-    lam_0=None, 
-    lam_inf=None
+    spectral_data : type[SpectralData],
+    lam_0 : float = None,
+    lam_inf : float = None,
 ) -> SpectralDataFitted:
     """_summary_
 
-    Args:
-        lam (np.ndarray): shape (spectrum)
-        intensity (np.ndarray): shape (batch, spectrum)
+    Parameters
+    ----------
+    spectral_data : type[SpectralData]
+        _description_
+    lam_0 : float, optional
+        _description_, by default None
+    lam_inf : float, optional
+        _description_, by default None
 
-    Returns:
-        SpectralDataFitted: _description_
+    Returns
+    -------
+    SpectralDataFitted
+        _description_
+
     """
     lam = spectral_data.lam
     intensity = spectral_data.intensity
@@ -128,10 +161,6 @@ def fit_data_lmfit(
     results.update({
         "covar": np.zeros((n_batch, 3, 3)),
         "result": [],
-        # "intensity_func": intensity_func,
-        # "intensity_func_log": intensity_func_log,
-        # "intensity_params": ("C", "D"),
-        # "intensity_props": {"lam_0": lam_0, "lam_inf": lam_inf},
     })
 
     for i in tqdm(range(n_batch)):
@@ -158,12 +187,12 @@ def fit_data_lmfit(
     )
 
 
-@njit
+# @njit
 def planck_dT(lam, T):
     return c1 * c2 * np.exp(c2/(lam*T)) / (lam**6 * T**2 * (np.exp(c2/(lam*T)) - 1)**2)
 
 
-@njit
+# @njit
 def intensity_jac(lam, T, C, D, lam_0, lam_inf):
     dT = linear_emissivity(lam, C, D, lam_0, lam_inf) * planck_dT(lam, T)
     dD = planck_eqn(lam, T)
@@ -171,12 +200,12 @@ def intensity_jac(lam, T, C, D, lam_0, lam_inf):
     return np.transpose([dT, dC, dD])
 
 
-@njit
+# @njit
 def planck_ls(lam, intensity, T):
     return planck_eqn(lam, T) - intensity
 
 
-@njit
+# @njit
 def intensity_ls(lam, intensity, T, C, D, lam_0, lam_inf):
     return intensity_func(lam, T, C, D, lam_0, lam_inf) - intensity
 
@@ -193,17 +222,34 @@ def ls_closure(func, xdata, ydata):
     
     return func_wrapped
 
-
-def fit_data_scipy(lam, intensity, lam_0=None, lam_inf=None, init_vals=None):
+def fit_data_scipy(
+    spectral_data : type[SpectralData],
+    lam_0 : float = None,
+    lam_inf : float = None,
+    init_vals : tuple[float, float, float] = None,
+) -> SpectralDataFitted:
     """_summary_
 
-    Args:
-        lam (np.ndarray): shape (spectrum)
-        intensity (np.ndarray): shape (batch, spectrum)
+    Parameters
+    ----------
+    spectral_data : type[SpectralData]
+        _description_
+    lam_0 : float, optional
+        _description_, by default None
+    lam_inf : float, optional
+        _description_, by default None
+    init_vals : tuple[float, float, float], optional
+        _description_, by default None
 
-    Returns:
-        _type_: _description_
+    Returns
+    -------
+    SpectralDataFitted
+        _description_
+
     """
+    lam = spectral_data.lam
+    intensity = spectral_data.intensity
+
     if lam_0 is None:
         lam_0 = min(lam)
     if lam_inf is None:
@@ -212,53 +258,20 @@ def fit_data_scipy(lam, intensity, lam_0=None, lam_inf=None, init_vals=None):
         init_vals = (1500 + abs0, 0.5, 0.5)
 
     n_batch = intensity.shape[0]
-    print(n_batch)
 
     fit_vars = ["T", "C", "D"]
     results = {var: np.zeros(n_batch) for var in fit_vars}
     results.update({
         "covar": np.zeros((n_batch, 3, 3)),
-        "intensity_func": intensity_func,
-        "intensity_func_log": intensity_func_log,
-        "intensity_params": ("C", "D"),
-        "props": {"lam_0": lam_0, "lam_inf": lam_inf},
-
         "nfev": np.zeros(n_batch),
-
     })
 
     intensity_ls_lam = lam_range_closure(intensity_ls, lam_0=lam_0, lam_inf=lam_inf)
     init_vals = np.broadcast_to(init_vals, (n_batch, len(fit_vars)))
 
-    # print(14)
     for i, init_val in tqdm(enumerate(init_vals), total=n_batch):
-    # for i in tqdm(range(n_batch)):
         lam_i, intensity_i = lam, intensity[i]
         lam_i, intensity_i = truncate_data(lam_i, intensity_i, 0.05)
-
-        # fit_vals, fit_cov = curve_fit(
-        #     planck_eqn, lam_i, intensity_i, [1500 + abs0],
-        #     # jac=planck_dT,
-        # )
-        # results['T'][i] = fit_vals[0]
-
-        # fit_vals, fit_cov = curve_fit(
-        #     partial(intensity_func, lam_0=lam_0, lam_inf=lam_inf), 
-        #     lam_i, intensity_i, 
-        #     # [fit_vals[0], 0.5, 0.5],
-        #     [1500+abs0, 0.5, 0.5],
-        #     # jac=partial(intensity_jac, lam_0=lam_0, lam_inf=lam_inf),
-        # )
-
-        # fit_vals, fit_cov = curve_fit_min(
-        #     # partial(intensity_func, lam_0=lam_0, lam_inf=lam_inf), 
-        #     intensity_func, 
-        #     lam_i, intensity_i, 
-        #     # [fit_vals[0], 0.5, 0.5],
-        #     [1500+abs0, 0.5, 0.5],
-        #     # jac=partial(intensity_jac, lam_0=lam_0, lam_inf=lam_inf),
-        #     lam_0=lam_0, lam_inf=lam_inf,
-        # )
 
         fit_vals, fit_cov = curve_fit_min(
             planck_ls, 
@@ -280,8 +293,14 @@ def fit_data_scipy(lam, intensity, lam_0=None, lam_inf=None, init_vals=None):
         results["covar"][i] = fit_cov
         results["nfev"][i] = infodict['nfev']
 
-    return results
-
+    return SpectralDataFitted(
+        fitted_data=spectral_data,
+        intensity_func=intensity_func,
+        intensity_func_log=intensity_func_log,
+        intensity_params=("C", "D"),
+        intensity_props={"lam_0": lam_0, "lam_inf": lam_inf},
+        scalar_data=results,
+    )
 
 def curve_fit_min(
     f, xdata, ydata, p0=None, jac=None, *, full_output=False, **kwargs
@@ -332,16 +351,19 @@ def curve_fit_min(
     else:
         return popt, pcov
 
-
-def fit_test_data_ratio(lam, intensity, polyorder=2, filter_params=None):
+def fit_data_ratio(
+    spectral_data : type[SpectralData],
+    lam_0 : float = None,
+    lam_inf : float = None,
+    polyorder : int = 0, 
+    filter_params : dict = None,
+) -> SpectralDataFitted:
     """
 
     Parameters
     ----------
-    lam : np.ndarray
-        shape (spectrum)
-    intensity : np.ndarray
-        shape (batch, spectrum)
+    spectral_data : type[SpectralData]
+        _description_
     polyorder : int, optional
         Order of polynomial fitted to emissivity, by default 2
     filter_params : dict, optional
@@ -361,8 +383,10 @@ def fit_test_data_ratio(lam, intensity, polyorder=2, filter_params=None):
     filter_params_default.update(filter_params or {})
     filter_params = filter_params_default
 
+    lam = spectral_data.lam
+    intensity = spectral_data.intensity
+
     n_batch = intensity.shape[0]
-    print(n_batch)
 
     def func(lam, T, poly_coef, lam_0, lam_inf):
         I_calc = planck_wein_eqn(lam, T)
@@ -372,15 +396,10 @@ def fit_test_data_ratio(lam, intensity, polyorder=2, filter_params=None):
             eps_vec = polynomial.polyval(lam * 1e9, poly_coef)
         return planck_wein_eqn(lam, T) * eps_vec
 
-    fit_vars = ["T", "T_std", "T_met"]
+    fit_vars = ["T", "T_std"]
     results = {var: np.zeros(n_batch) for var in fit_vars}
     results.update({
         "poly_coef": np.zeros((n_batch, polyorder + 1)),
-        "intensity_func": func,
-        "intensity_func_log": None,
-        "intensity_params": ("poly_coef", ),
-        "props": {"lam_0": 0, "lam_inf": 1},
-
         "T_calc": [],
     })
 
@@ -478,4 +497,110 @@ def fit_test_data_ratio(lam, intensity, polyorder=2, filter_params=None):
         # results["I"][i] = I_calc
         # results["epsilon"] [i] = eps_vec
 
-    return results
+    return SpectralDataFitted(
+        fitted_data=spectral_data,
+        intensity_func=func,
+        intensity_func_log=None,
+        intensity_params=("poly_coef", ),
+        intensity_props={"lam_0": 0, "lam_inf": 1},
+        scalar_data=results,
+    )
+
+def fit_data_pymc(
+    spectral_data : type[SpectralData],
+    lam_0 : float = None,
+    lam_inf : float = None,
+    model=None,
+) -> SpectralDataFitted:
+    import pymc as pm
+    from sklearn.preprocessing import MinMaxScaler
+
+    lam = spectral_data.lam
+    intensity = spectral_data.intensity
+
+    if lam_0 is None:
+        lam_0 = min(lam)
+    if lam_inf is None:
+        lam_inf = max(lam)
+
+    n_batch = intensity.shape[0]
+
+    def default_model(lam_data, intensity_data, lam_0, lam_inf):
+        with pm.Model() as model:
+            lam_data = pm.Data("lam_data", lam_data)
+            scaler = MinMaxScaler()
+            intensity_data = scaler.fit_transform(intensity_data[:, None])[:, 0]
+            intensity_data = pm.Data("intensity_data", intensity_data)
+            T = pm.Uniform("T", 300, 5300)
+            # C = pm.Uniform("C", 0, 1)
+            # D = pm.Uniform("D", 0, 1)
+            # https://discourse.pymc.io/t/how-to-uniformly-sample-two-variables-in-a-lower-triangular-area-y-x/13382/19
+            C = pm.Uniform("C", 0, 1)
+            D = pm.Uniform("D", C, 1)
+            # Penalize high C, so that joint of C,D is uniform
+            pm.Potential("pot", pm.math.log(1-C)) 
+            sigma = pm.HalfNormal("sigma")
+
+            # likelihood = pm.Normal(
+            #     "intensity",
+            #     mu=intensity_func(lam_data, T, C, D, lam_0, lam_inf) * scaler.scale_[0] + scaler.min_[0],
+            #     sigma=sigma,
+            #     observed=intensity_data,
+            # )
+            normal_dist = pm.Normal.dist(
+                mu=intensity_func(lam_data, T, C, D, lam_0, lam_inf) * scaler.scale_[0] + scaler.min_[0], 
+                sigma=sigma
+            )
+            likelihood = pm.Truncated(
+                "intensity", normal_dist, lower=0., observed=intensity_data,
+            )
+            idata = pm.sample(3000)
+
+        return idata, model
+    
+    def default_log_model(lam_data, intensity_data, lam_0, lam_inf):
+        with pm.Model() as model:
+            lam_data = pm.Data("lam_data", lam_data)
+            intensity_data = pm.Data("intensity_data", np.log(intensity_data))
+            T = pm.Uniform("T", 300, 5300)
+            C = pm.Uniform("C", 0, 1)
+            D = pm.Uniform("D", 0, 1)
+            sigma = pm.HalfNormal("sigma")
+
+            likelihood = pm.Normal(
+                "intensity",
+                mu=intensity_func_log(lam_data, T, C, D, lam_0, lam_inf),
+                sigma=sigma,
+                observed=intensity_data,
+            )
+            idata = pm.sample(3000)
+
+        return idata, model
+
+    if model is None:
+        model = default_log_model
+
+    fit_vars = ["T", "C", "D", "sigma"]
+    results = {var: np.zeros(n_batch) for var in fit_vars}
+    results.update({
+        "idata": [],
+    })
+
+    for i in range(n_batch):
+        lam_i, intensity_i = lam, intensity[i]
+        lam_i, intensity_i = truncate_data(lam_i, intensity_i, 0.05)
+
+        idata, _ = model(lam_i, intensity_i, lam_0, lam_inf)
+        post_mean = idata.posterior.mean()
+        for var in fit_vars:
+            results[var][i] = post_mean[var].item()
+        results["idata"].append(idata)
+
+    return SpectralDataFitted(
+        fitted_data=spectral_data,
+        intensity_func=intensity_func,
+        intensity_func_log=intensity_func_log,
+        intensity_params=("C", "D"),
+        intensity_props={"lam_0": lam_0, "lam_inf": lam_inf},
+        scalar_data=results,
+    )
