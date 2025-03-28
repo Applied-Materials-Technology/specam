@@ -8,25 +8,22 @@ from specam.data import SpectralData
 
 
 class SpectrumPlot():
-    def __init__(self, plot_data_kwargs: list[dict]=None, i_T=None):
+    def __init__(self, plot_data_kwargs: list[dict]=None, i_batch=None):
         self.lines = []  
-        self.line_true = None
-        self.points_true = None 
+        self.line_true_idx = None
+        self.slider_batch = None
 
         plot_slider = False
-        if i_T is None:
-            i_T = 0
+        if i_batch is None:
+            i_batch = 0
             plot_slider = True
+        self.i_batch = i_batch
+        print(self.i_batch)
 
         fig = plt.figure(figsize=(4, 3), constrained_layout=(not plot_slider))
         ax = plt.gca()
-
         ax.set_xlabel("Wavelength ($\mu$m)")
         ax.set_ylabel("Intensity")
-        ax.legend()
-
-        for kwargs in plot_data_kwargs or []:
-            self.add_data(**kwargs)
 
         if plot_slider:
             def slider_key(event, slider):
@@ -35,28 +32,30 @@ class SpectrumPlot():
                 elif event.key == 'right':
                     slider.set_val(slider.val + 1)
 
-            slider_max = i_T
-            
             fig.subplots_adjust(bottom=0.2)
-            i_slider = Slider(
+            slider_batch = Slider(
                 ax=fig.add_axes([0.18, 0.02, 0.65, 0.01]),
                 label="",
                 valmin=0,
-                # valmax=len(test_data["I"]) - 1,
-                # valmax=i_T,
-                valmax=10,
+                valmax=100,  # unknown, updated when data added
                 valstep=1,
-                valinit=i_T,
+                valinit=i_batch,
             )
-            i_slider.on_changed(self.update)
+            slider_batch.on_changed(self.update)
             fig.canvas.mpl_connect(
-                'key_press_event', lambda e: slider_key(e, i_slider)
+                'key_press_event', lambda e: slider_key(e, slider_batch)
             )
-            self.i_slider = i_slider  # keep fig alive
+            self.slider_batch = slider_batch  # keep fig alive
             # rtn = rtn + (i_slider ,)
+
+        for kwargs in plot_data_kwargs or []:
+            self.add_data(**kwargs)
 
         self.fig = fig
         self.ax = ax
+
+    def add_legend(self):
+        self.ax.legend()
 
     def check_batch_size(self, batch_size):
         if len(self.lines) == 0:
@@ -69,7 +68,9 @@ class SpectrumPlot():
         func = {
             'true': self.add_true,
         }.get(str(kind).lower(), self.add_result)
-        return func(**kwargs)
+        line = func(**kwargs)
+        self.update(self.i_batch)
+        return line
 
     def add_result(self, plot_data: type[SpectralData], label: str, **kwargs):
         self.check_batch_size(plot_data.batch_size)
@@ -79,11 +80,11 @@ class SpectrumPlot():
             'label': label,
             'mpl_line': mpl_line,
         }
-        if len(self.lines) == 0 and self.i_slider is not None:
-            self.i_slider.valmax = plot_data.batch_size
-            self.i_slider.ax.set_xlim(
-                self.i_slider.valmin, 
-                self.i_slider.valmax
+        if len(self.lines) == 0 and self.slider_batch is not None:
+            self.slider_batch.valmax = plot_data.batch_size - 1
+            self.slider_batch.ax.set_xlim(
+                self.slider_batch.valmin, 
+                self.slider_batch.valmax
             )
         self.lines.append(line)
         return line
