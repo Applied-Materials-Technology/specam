@@ -113,8 +113,8 @@ class SpectralDataGenerated(SpectralData, ScalarData):
         intensity_func: callable,
         intensity_func_log: callable,
         intensity_params: dict,
-        noise_sigma: Optional[float],
-        signal_noise_ratio: Optional[float],
+        noise_sigma: Optional[float] = None,
+        signal_noise_ratio: Optional[float] = None,
     ):
         grid = np.meshgrid(T, lam, indexing="ij")
         I = intensity_func(grid[1], grid[0], **intensity_params)
@@ -138,7 +138,7 @@ class SpectralDataGenerated(SpectralData, ScalarData):
             'intensity': I,
         }
         scalar_data = {
-            'temperature': T,
+            'T': T,
             'noise_sigma': noise_sigma
         }
 
