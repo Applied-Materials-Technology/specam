@@ -1,7 +1,7 @@
 import warnings
 import itertools
-from functools import partial
 from tqdm import tqdm
+from typing import Literal, Union
 
 import numpy as np
 from numpy.polynomial import polynomial
@@ -149,9 +149,12 @@ def fit_data_lmfit(
     params_linear = create_params(
         lam_0={"value": lam_0, "vary": False},
         lam_inf={"value": lam_inf, "vary": False},
+        T={"value": 1500 + abs0, "min": 300, "max": 5300},
         C={"value": 0.5, "min": 0, "max": 1},
         D={"value": 0.5, "min": 0, "max": 1},
-        T={"value": 1500 + abs0, "min": 300, "max": 5300},
+        # CD_constraint={'value': 0, 'min': 0},
+        # C={'value': 0.5, 'min': 0},
+        # D={'expr': 'C+CD_constraint', 'max': 1},
     )
 
     n_batch = intensity.shape[0]
@@ -170,7 +173,6 @@ def fit_data_lmfit(
         result_black = mod_black.fit(intensity_i, params_black, lam=lam_i)
 
         params_linear['T'].value = result_black.best_values['T']
-
         result = mod_linear.fit(intensity_i, params_linear, lam=lam_i)
         for var in fit_vars:
             results[var][i] = result.best_values[var]
@@ -357,6 +359,8 @@ def fit_data_ratio(
     lam_inf : float = None,
     polyorder : int = 0, 
     filter_params : dict = None,
+    combinations : Union[Literal['all', 'adjacent'], int] = 'all',
+    spectral_samples : int = None,
 ) -> SpectralDataFitted:
     """
 
@@ -417,24 +421,27 @@ def fit_data_ratio(
         # all spectral datapoints
         n_lam = len(lam_i)
         idxs = np.arange(n_lam)
-        # downsample
-        n_spectral_samples = 20
-        idxs = np.linspace(0, n_lam-1, n_spectral_samples + 1)[:-1]
-        idxs += n_lam / n_spectral_samples / 2
-        idxs = np.round(idxs).astype(int)
+        if spectral_samples is not None and spectral_samples < n_lam:
+            # downsample
+            idxs = np.linspace(0, n_lam-1, spectral_samples + 1)[:-1]
+            idxs += n_lam / spectral_samples / 2
+            idxs = np.round(idxs).astype(int)
 
-        # all combinations
-        pair_idxs = np.array(list(itertools.combinations(idxs, 2))).T
-        # only adjacent points
-        # pair_idxs = np.array([idxs[:-1], idxs[1:]])
-        # combinations up to dist away
-        # dist = 6
-        # assert len(idxs) > 2*(dist+1)
-        # pair_idxs = [[], []]
-        # for i in range(1, dist+2):
-        #     pair_idxs[0] += idxs[:-i].tolist()
-        #     pair_idxs[1] += idxs[i:].tolist()
-        # pair_idxs = np.array(pair_idxs)
+        if combinations == 'all':
+            pair_idxs = np.array(list(itertools.combinations(idxs, 2))).T
+        elif combinations == 'adjacent':
+            pair_idxs = np.array([idxs[:-1], idxs[1:]])
+        elif isinstance(combinations, int):
+            # combinations up to dist away
+            dist = combinations
+            assert len(idxs) > 2*(dist+1)
+            pair_idxs = [[], []]
+            for j in range(1, dist+2):
+                pair_idxs[0] += idxs[:-j].tolist()
+                pair_idxs[1] += idxs[j:].tolist()
+            pair_idxs = np.array(pair_idxs)
+        else:
+            raise ValueError(f'Unknown combinations `{combinations}`')
 
         # Ratio of intensities, remove any log < 0
         # ri = intensity_i[pair_idxs[0]] / intensity_i[pair_idxs[1]]
@@ -464,10 +471,10 @@ def fit_data_ratio(
                     return big
                 with np.errstate(invalid='raise'):
                     try:
-                        logRe = np.log(eps_vec[pair_idxs[0]] / eps_vec[pair_idxs[1]])
+                        log_re = np.log(eps_vec[pair_idxs[0]] / eps_vec[pair_idxs[1]])
                     except FloatingPointError:
                         return big
-                T = T_part / (log_ri - 5 * log_rl - logRe)
+                T = T_part / (log_ri - 5 * log_rl - log_re)
                 T_qua = np.percentile(T, [25, 75])
                 return (T_qua[1] - T_qua[0]) / (T_qua[1] + T_qua[0])
             pc0 = [0.5] + [0.] * polyorder
@@ -578,7 +585,7 @@ def fit_data_pymc(
         return idata, model
 
     if model is None:
-        model = default_log_model
+        model = default_model
 
     fit_vars = ["T", "C", "D", "sigma"]
     results = {var: np.zeros(n_batch) for var in fit_vars}
